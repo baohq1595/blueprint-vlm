@@ -27,13 +27,28 @@ exact ground truth.
 
 ![example plan](docs/example_plan.png)
 
-Three task types:
+Four task types:
 
 | task | question | legend lookup | purpose |
 |---|---|---|---|
 | `count_by_name` | "how many door symbols" | no | control |
 | `count_by_code` | "how many `G3` symbols" | **yes** | isolates the cross-reference |
 | `takeoff` | full JSON, every legend code | **yes** | the product-shaped task |
+| `room_tally` | rooms by name | no | text axis, not symbols |
+
+### Labels are count maps, never lists or sets
+
+`room_tally` returns `{"BEDROOM": 3, "BATH": 1}`, not `["BEDROOM", "BATH", "BEDROOM", "BEDROOM"]`
+and not `["BEDROOM", "BATH"]`.
+
+A **list** carries an order that is an artefact of how the generator recursed, not
+anything a reader could derive from the drawing, so the model would be scored on
+reproducing an implementation detail. A **set** throws the count away, and "how many
+bedrooms" is exactly what a takeoff has to answer.
+
+A count map is order-free and count-preserving, and it is the same shape as `takeoff`,
+so one scoring path covers both. Repeated rooms are drawn numbered (`BEDROOM 1`,
+`BEDROOM 2`) the way an architect would, so the label is recoverable from the image.
 
 ---
 
