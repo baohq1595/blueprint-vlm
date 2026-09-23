@@ -96,6 +96,21 @@ python scripts/score.py --split data/synth/test \
 ```
 
 `notebooks/colab_train.ipynb` runs the same thing on a rented GPU.
+`notebooks/kaggle_train_2xT4.ipynb` runs it on Kaggle's free 2x T4.
+
+### Hardware notes
+
+| | A100 / L4 / 4090 | Kaggle 2x T4 |
+|---|---|---|
+| config | `qwen25vl_3b_lora.yaml` | `qwen25vl_3b_lora_t4.yaml` |
+| precision | bf16 | **fp16** -- Turing has no bfloat16 |
+| visual tokens | 1536 | 768 |
+| train records | 8000 | 4000 (session limit) |
+
+`train.py` picks the dtype from `torch.cuda.is_bf16_supported()`, so the same code
+runs on both. Two T4s are two 16GB cards, not one 32GB pool: the model is pinned
+per-rank and the cards are used as DDP replicas, because `device_map="auto"` would
+shard one model across both and collide with `Trainer`.
 
 ---
 

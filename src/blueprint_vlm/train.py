@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -16,6 +17,29 @@ from transformers import (AutoProcessor, BitsAndBytesConfig,
 from .data import PlanSFT, load_records
 
 
+def pick_dtype() -> tuple[torch.dtype, bool]:
+    """T4 (Turing, sm_75) has no bfloat16. Ampere and later do.
+
+    Passing bf16=True to TrainingArguments on a T4 raises outright, and
+    torch_dtype=bfloat16 silently emulates at a large cost, so this has to be
+    decided from the hardware rather than hardcoded.
+    """
+    ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    return (torch.bfloat16, True) if ok else (torch.float16, False)
+
+
+def device_map_for_training() -> dict:
+    """Pin the whole model to one GPU.
+
+    device_map="auto" shards a model across both cards, which Trainer reads as
+    model-parallel and which conflicts with DDP. Under `accelerate launch
+    --multi_gpu` each rank gets its own full copy instead, which is what you
+    want for a 3B model in 4-bit -- it fits in 16GB with room to spare.
+    """
+    rank = os.environ.get("LOCAL_RANK")
+    return {"": int(rank)} if rank is not None else {"": 0}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
@@ -25,23 +49,29 @@ def main() -> None:
 
     cfg = yaml.safe_load(Path(args.config).read_text())
     set_seed(cfg["seed"])
+    dtype, bf16_ok = pick_dtype()
+    print(f"compute dtype: {dtype} (bf16 supported: {bf16_ok})")
 
     processor = AutoProcessor.from_pretrained(
         cfg["model_id"], min_pixels=cfg["min_pixels"], max_pixels=cfg["max_pixels"])
 
     quant = (BitsAndBytesConfig(load_in_4bit=True,
                                 bnb_4bit_quant_type="nf4",
-                                bnb_4bit_compute_dtype=torch.bfloat16,
+                                bnb_4bit_compute_dtype=dtype,
                                 bnb_4bit_use_double_quant=True)
              if cfg["load_in_4bit"] else None)
 
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         cfg["model_id"], quantization_config=quant,
-        torch_dtype=torch.bfloat16, device_map="auto")
+        torch_dtype=dtype, device_map=device_map_for_training(),
+        attn_implementation="sdpa")   # flash-attn 2 needs Ampere; sdpa runs on T4
     model.config.use_cache = False
 
     if cfg["load_in_4bit"]:
-        model = prepare_model_for_kbit_training(model)
+        model = prepare_model_for_kbit_training(
+            model, use_gradient_checkpointing=True,
+            gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.enable_input_require_grads()   # otherwise checkpointing yields no grads
 
     targets = list(cfg["lora_targets"])
     lora = LoraConfig(
@@ -53,8 +83,16 @@ def main() -> None:
     model = get_peft_model(model, lora)
     model.print_trainable_parameters()
 
-    train_ds = PlanSFT(load_records(args.train), processor, cfg["image_root"], cfg["max_seq_len"])
-    dev_ds = PlanSFT(load_records(args.dev), processor, cfg["image_root"], cfg["max_seq_len"])
+    train_recs = load_records(args.train)
+    dev_recs = load_records(args.dev)
+    if cfg.get("limit_train"):
+        train_recs = train_recs[:cfg["limit_train"]]
+    if cfg.get("limit_dev"):
+        dev_recs = dev_recs[:cfg["limit_dev"]]
+    print(f"train {len(train_recs)} records, dev {len(dev_recs)}")
+
+    train_ds = PlanSFT(train_recs, processor, cfg["image_root"], cfg["max_seq_len"])
+    dev_ds = PlanSFT(dev_recs, processor, cfg["image_root"], cfg["max_seq_len"])
 
     targs = TrainingArguments(
         output_dir=cfg["out_dir"],
@@ -64,8 +102,12 @@ def main() -> None:
         learning_rate=cfg["lr"],
         warmup_ratio=cfg["warmup_ratio"],
         lr_scheduler_type="cosine",
-        bf16=True,
+        bf16=bf16_ok,
+        fp16=not bf16_ok,
+        optim=cfg.get("optim", "paged_adamw_8bit"),
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        ddp_find_unused_parameters=False,
         logging_steps=10,
         eval_strategy="epoch",
         save_strategy="epoch",

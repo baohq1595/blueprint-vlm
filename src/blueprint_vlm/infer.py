@@ -15,16 +15,23 @@ from .data import load_records
 from .tasks import to_messages
 
 
+def _dtype() -> torch.dtype:
+    ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    return torch.bfloat16 if ok else torch.float16
+
+
 def load(cfg: dict, adapter: str | None):
+    dtype = _dtype()
     processor = AutoProcessor.from_pretrained(
         cfg["model_id"], min_pixels=cfg["min_pixels"], max_pixels=cfg["max_pixels"])
     quant = (BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
-                                bnb_4bit_compute_dtype=torch.bfloat16,
+                                bnb_4bit_compute_dtype=dtype,
                                 bnb_4bit_use_double_quant=True)
              if cfg["load_in_4bit"] else None)
     model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
         cfg["model_id"], quantization_config=quant,
-        torch_dtype=torch.bfloat16, device_map="auto")
+        torch_dtype=dtype, device_map="auto",
+        attn_implementation="sdpa")
     if adapter:
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)

@@ -1,0 +1,37 @@
+# Kaggle 2x T4 (Turing, sm_75). Differences from the A100 config, all forced by
+# the hardware or the 12-hour session limit:
+#
+#   fp16 not bf16   - Turing has no bfloat16; train.py picks this automatically
+#   max_pixels down - 768 visual tokens instead of 1536, roughly halves step time
+#   limit_train     - 4000 records keeps a 2-epoch run inside the session limit
+#   paged_adamw_8bit- optimiser state in 8-bit, leaves headroom on a 16GB card
+#
+# Run it across both cards with:
+#   PYTHONPATH=src accelerate launch --multi_gpu --num_processes 2 \
+#       --mixed_precision fp16 --module blueprint_vlm.train \
+#       --config configs/qwen25vl_3b_lora_t4.yaml
+
+model_id: Qwen/Qwen2.5-VL-3B-Instruct
+image_root: data/synth
+out_dir: outputs/qwen25vl-3b-lora-t4
+
+min_pixels: 200704        # 256 * 28 * 28
+max_pixels: 602112        # 768 * 28 * 28
+
+load_in_4bit: true
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+tune_vision_tower: false
+
+epochs: 2
+lr: 1.0e-4
+batch_size: 1
+grad_accum: 4             # x2 GPUs = effective batch 8
+warmup_ratio: 0.03
+max_seq_len: 3072
+optim: paged_adamw_8bit
+limit_train: 4000
+limit_dev: 200
+seed: 0
