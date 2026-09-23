@@ -25,6 +25,9 @@ Q_CODE = ('Using the legend, how many {code} symbols are on this plan? '
           'Reply {{"answer": <int>, "confidence": "HIGH"|"LOW"}}')
 Q_TAKE = ('Produce a quantity takeoff. Count every symbol in the legend and reply '
           '{"takeoff": {"<code>": <int>, ...}, "confidence": "HIGH"|"LOW"}')
+Q_ROOMS = ('Read the room labels. Count rooms by name, ignoring any number suffix '
+           '(BEDROOM 1 and BEDROOM 2 are two BEDROOM). Reply '
+           '{"rooms": {"<NAME>": <int>, ...}, "confidence": "HIGH"|"LOW"}')
 
 
 def build(meta: dict, rng: random.Random) -> list[dict]:
@@ -50,6 +53,14 @@ def build(meta: dict, rng: random.Random) -> list[dict]:
         "task": "takeoff", "plan_id": meta["plan_id"], "image": meta["image"],
         "question": Q_TAKE,
         "target": {"takeoff": meta["counts_by_code"], "confidence": "HIGH"},
+    })
+
+    # A count map, not a list and not a set. A set would throw away the count,
+    # and "how many bedrooms" is exactly the question a takeoff has to answer.
+    out.append({
+        "task": "room_tally", "plan_id": meta["plan_id"], "image": meta["image"],
+        "question": Q_ROOMS,
+        "target": {"rooms": meta["room_counts"], "confidence": "HIGH"},
     })
     return out
 

@@ -28,16 +28,24 @@ def parse(raw: str) -> dict | None:
         return None
 
 
+DICT_KEYS = ("takeoff", "rooms")
+
+
 def _correct(pred: dict, rec: dict) -> tuple[bool, float | None]:
-    """(exact match, absolute error) -- error is None for takeoff."""
+    """(exact match, absolute error) -- error is None for count-map tasks.
+
+    Dispatch is on the target's payload key rather than the task name, so a new
+    count-map task scores correctly without touching this function.
+    """
     tgt = rec["target"]
-    if rec["task"] == "takeoff":
-        got = pred.get("takeoff")
-        if not isinstance(got, dict):
-            return False, None
-        want = tgt["takeoff"]
-        norm = {str(k): got.get(str(k)) for k in want}
-        return norm == want, None
+    for key in DICT_KEYS:
+        if key in tgt:
+            got = pred.get(key)
+            if not isinstance(got, dict):
+                return False, None
+            want = tgt[key]
+            norm = {str(k): got.get(str(k)) for k in want}
+            return norm == want, None
     got = pred.get("answer")
     if not isinstance(got, (int, float)) or isinstance(got, bool):
         return False, None

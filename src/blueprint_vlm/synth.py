@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import random
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,7 +32,8 @@ class Plan:
     plan_id: str
     counts: dict[str, int]          # canonical symbol name -> count
     legend: dict[str, str]          # code -> canonical symbol name
-    rooms: list[str]
+    rooms: list[str]                # labels as drawn: ["BEDROOM 1", "BEDROOM 2", "KITCHEN"]
+    room_counts: dict[str, int]     # the label shape: {"BEDROOM": 2, "KITCHEN": 1}
     seed: int
     image: Image.Image = field(repr=False, default=None)
 
@@ -47,6 +49,7 @@ class Plan:
             "legend": self.legend,
             "counts_by_code": self.counts_by_code,
             "rooms": self.rooms,
+            "room_counts": self.room_counts,
         }
 
 
@@ -135,16 +138,26 @@ def generate(seed: int, hard: bool = False) -> Plan:
     rooms = _split(shell, rng.randint(3, 4) if hard else rng.randint(2, 3), rng,
                    min_side=110 if hard else 150)
     counts = dict.fromkeys(SYMBOLS, 0)
-    room_names: list[str] = []
+
+    # Names are assigned up front so repeats can be numbered the way real plans
+    # do. Two rooms both labelled "BEDROOM" are visually ambiguous; "BEDROOM 1"
+    # and "BEDROOM 2" are not, and that is what an architect would draw.
+    base_names = [rng.choice(ROOM_NAMES) for _ in rooms]
+    tally = Counter(base_names)
+    seen: dict[str, int] = defaultdict(int)
+    room_labels = []
+    for n in base_names:
+        if tally[n] > 1:
+            seen[n] += 1
+            room_labels.append(f"{n} {seen[n]}")
+        else:
+            room_labels.append(n)
 
     for r in rooms:
         d.rectangle(r, outline="black", width=WALL)
 
-    # doors on interior walls, windows on the shell
-    for x0, y0, x1, y1 in rooms:
-        name = rng.choice(ROOM_NAMES)
-        room_names.append(name)
-        d.text((x0 + 14, y0 + 12), name, fill="black", font=f_room)
+    for idx, (x0, y0, x1, y1) in enumerate(rooms):
+        d.text((x0 + 14, y0 + 12), room_labels[idx], fill="black", font=f_room)
 
         for _ in range(rng.randint(1, 2)):                       # doors
             if rng.random() < 0.5 and x1 - x0 > 120:
@@ -189,7 +202,7 @@ def generate(seed: int, hard: bool = False) -> Plan:
         d.text((lx + 74, cy + 6), code, fill="black", font=f_leg)
 
     return Plan(plan_id=f"plan_{seed:05d}", counts=counts, legend=legend,
-                rooms=room_names, seed=seed, image=img)
+                rooms=room_labels, room_counts=dict(tally), seed=seed, image=img)
 
 
 def build(out_dir: Path, seeds: range, hard: bool = False) -> list[dict]:
