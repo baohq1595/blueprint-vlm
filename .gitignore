@@ -1,0 +1,9 @@
+data/
+outputs/
+checkpoints/
+*.pt
+*.safetensors
+__pycache__/
+*.pyc
+.venv/
+.DS_Store

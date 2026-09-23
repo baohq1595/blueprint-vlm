@@ -1,0 +1,23 @@
+model_id: Qwen/Qwen2.5-VL-3B-Instruct
+image_root: data/synth
+out_dir: outputs/qwen25vl-3b-lora
+
+# Vision resolution. Floor-plan symbols are ~22px, so this is the single most
+# sensitive knob in the whole run -- sweep it before tuning anything else.
+min_pixels: 200704        # 256 * 28 * 28
+max_pixels: 1204224       # 1536 * 28 * 28
+
+load_in_4bit: true
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+tune_vision_tower: false
+
+epochs: 2
+lr: 1.0e-4
+batch_size: 1
+grad_accum: 8
+warmup_ratio: 0.03
+max_seq_len: 4096
+seed: 0
