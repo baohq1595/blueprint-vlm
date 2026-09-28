@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
+import math
 import os
 from pathlib import Path
 
@@ -38,6 +40,67 @@ def device_map_for_training() -> dict:
     """
     rank = os.environ.get("LOCAL_RANK")
     return {"": int(rank)} if rank is not None else {"": 0}
+
+
+def build_training_args(cfg: dict, bf16_ok: bool, n_train: int) -> TrainingArguments:
+    """Construct TrainingArguments against whatever signature is installed.
+
+    `TrainingArguments` is refactored often, and a kwarg that has existed for
+    years can vanish in a major release -- discovering that one TypeError at a
+    time costs a GPU session each. So: state the intent, ask the class what it
+    accepts, translate what has been renamed, and report anything dropped
+    instead of failing.
+    """
+    import transformers
+    world = int(os.environ.get("WORLD_SIZE", "1"))
+    steps_per_epoch = max(1, math.ceil(n_train / (cfg["batch_size"] * cfg["grad_accum"] * world)))
+    total_steps = steps_per_epoch * cfg["epochs"]
+
+    want = {
+        "output_dir": cfg["out_dir"],
+        "num_train_epochs": cfg["epochs"],
+        "per_device_train_batch_size": cfg["batch_size"],
+        "gradient_accumulation_steps": cfg["grad_accum"],
+        "learning_rate": cfg["lr"],
+        "warmup_ratio": cfg["warmup_ratio"],
+        "lr_scheduler_type": "cosine",
+        "bf16": bf16_ok,
+        "fp16": not bf16_ok,
+        "optim": cfg.get("optim", "paged_adamw_8bit"),
+        "gradient_checkpointing": True,
+        "gradient_checkpointing_kwargs": {"use_reentrant": False},
+        "ddp_find_unused_parameters": False,
+        "logging_steps": 10,
+        "eval_strategy": "epoch",
+        "save_strategy": "epoch",
+        "save_total_limit": 2,
+        "report_to": [],
+        "remove_unused_columns": False,
+        "seed": cfg["seed"],
+    }
+
+    accepted = set(inspect.signature(TrainingArguments.__init__).parameters)
+
+    # renames seen across versions: old name <- new name we asked for
+    alias = {
+        "eval_strategy": "evaluation_strategy",
+        "evaluation_strategy": "eval_strategy",
+    }
+    for asked, other in alias.items():
+        if asked in want and asked not in accepted and other in accepted:
+            want[other] = want.pop(asked)
+
+    # warmup_ratio dropped but warmup_steps kept -> convert rather than lose warmup
+    if "warmup_ratio" in want and "warmup_ratio" not in accepted and "warmup_steps" in accepted:
+        want["warmup_steps"] = max(1, int(total_steps * want.pop("warmup_ratio")))
+
+    kept = {k: v for k, v in want.items() if k in accepted}
+    dropped = sorted(set(want) - set(kept))
+
+    print(f"transformers {transformers.__version__} | ~{total_steps} optimizer steps")
+    if dropped:
+        print(f"TrainingArguments does not accept, dropped: {dropped}")
+    return TrainingArguments(**kept)
 
 
 def main() -> None:
@@ -94,28 +157,7 @@ def main() -> None:
     train_ds = PlanSFT(train_recs, processor, cfg["image_root"], cfg["max_seq_len"])
     dev_ds = PlanSFT(dev_recs, processor, cfg["image_root"], cfg["max_seq_len"])
 
-    targs = TrainingArguments(
-        output_dir=cfg["out_dir"],
-        num_train_epochs=cfg["epochs"],
-        per_device_train_batch_size=cfg["batch_size"],
-        gradient_accumulation_steps=cfg["grad_accum"],
-        learning_rate=cfg["lr"],
-        warmup_ratio=cfg["warmup_ratio"],
-        lr_scheduler_type="cosine",
-        bf16=bf16_ok,
-        fp16=not bf16_ok,
-        optim=cfg.get("optim", "paged_adamw_8bit"),
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        ddp_find_unused_parameters=False,
-        logging_steps=10,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        save_total_limit=2,
-        report_to=["none"],
-        remove_unused_columns=False,
-        seed=cfg["seed"],
-    )
+    targs = build_training_args(cfg, bf16_ok, len(train_recs))
 
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds,
                       eval_dataset=dev_ds, data_collator=train_ds.collate)
