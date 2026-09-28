@@ -1,0 +1,33 @@
+# Short run: prove the pipeline end to end and get a real delta, fast.
+# 2000 records x 1 epoch. Scale up only once you have a complete run banked.
+#
+#   PYTHONPATH=src accelerate launch --multi_gpu --num_processes 2 \
+#       --module blueprint_vlm.train --config configs/qwen25vl_3b_lora_quick.yaml
+
+model_id: Qwen/Qwen2.5-VL-3B-Instruct
+image_root: data/synth
+out_dir: /kaggle/working/outputs/qwen25vl-3b-quick
+
+min_pixels: 200704        # 256 * 28 * 28
+max_pixels: 602112        # 768 * 28 * 28
+
+load_in_4bit: true
+lora_r: 32
+lora_alpha: 64
+lora_dropout: 0.05
+lora_targets: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+tune_vision_tower: false
+
+epochs: 1
+lr: 2.0e-4               # higher, since there is only one pass over the data
+batch_size: 1
+grad_accum: 4
+warmup_ratio: 0.03
+max_seq_len: 3072
+optim: paged_adamw_8bit
+limit_train: 2000
+limit_dev: 100
+save_strategy: steps
+save_steps: 100
+eval_strategy: "no"      # skip mid-run eval; score properly afterwards
+seed: 0

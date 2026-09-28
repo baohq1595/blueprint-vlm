@@ -71,8 +71,11 @@ def build_training_args(cfg: dict, bf16_ok: bool, n_train: int) -> TrainingArgum
         "gradient_checkpointing_kwargs": {"use_reentrant": False},
         "ddp_find_unused_parameters": False,
         "logging_steps": 10,
-        "eval_strategy": "epoch",
-        "save_strategy": "epoch",
+        "eval_strategy": cfg.get("eval_strategy", "epoch"),
+        # Checkpoint on a step interval, not per epoch: a session that dies
+        # 80% through epoch 1 otherwise leaves nothing to resume from.
+        "save_strategy": cfg.get("save_strategy", "steps"),
+        "save_steps": cfg.get("save_steps", 100),
         "save_total_limit": 2,
         "report_to": [],
         "remove_unused_columns": False,
@@ -108,6 +111,8 @@ def main() -> None:
     ap.add_argument("--config", required=True)
     ap.add_argument("--train", default="data/synth/train")
     ap.add_argument("--dev", default="data/synth/dev")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue from the newest checkpoint in out_dir")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -161,7 +166,10 @@ def main() -> None:
 
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds,
                       eval_dataset=dev_ds, data_collator=train_ds.collate)
-    trainer.train()
+    ckpts = sorted(Path(cfg["out_dir"]).glob("checkpoint-*")) if args.resume else []
+    if ckpts:
+        print(f"resuming from {ckpts[-1].name}")
+    trainer.train(resume_from_checkpoint=bool(ckpts))
     trainer.save_model(cfg["out_dir"])
     processor.save_pretrained(cfg["out_dir"])
     Path(cfg["out_dir"], "config_used.json").write_text(json.dumps(cfg, indent=2))
