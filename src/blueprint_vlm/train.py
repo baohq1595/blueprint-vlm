@@ -119,9 +119,26 @@ def main() -> None:
     ap.add_argument("--dev", default="data/synth/dev")
     ap.add_argument("--resume", action="store_true",
                     help="continue from the newest checkpoint in out_dir")
+    # Runtime overrides. Trainer accepts a fractional epoch count, so
+    # --epochs 0.1 is a genuine smoke test over a tenth of the data.
+    ap.add_argument("--epochs", type=float, help="override config epochs (may be fractional)")
+    ap.add_argument("--limit-train", type=int, help="override config limit_train")
+    ap.add_argument("--max-pixels", type=int, help="override config max_pixels")
+    ap.add_argument("--lr", type=float, help="override config lr")
+    ap.add_argument("--out-dir", help="override config out_dir")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
+
+    overrides = {
+        "epochs": args.epochs, "limit_train": args.limit_train,
+        "max_pixels": args.max_pixels, "lr": args.lr, "out_dir": args.out_dir,
+    }
+    applied = {k: v for k, v in overrides.items() if v is not None}
+    for k, v in applied.items():
+        print(f"override: {k} {cfg.get(k)} -> {v}")
+        cfg[k] = v
+
     set_seed(cfg["seed"])
     dtype, bf16_ok = pick_dtype()
     print(f"compute dtype: {dtype} (bf16 supported: {bf16_ok})")
