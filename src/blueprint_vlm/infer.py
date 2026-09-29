@@ -56,6 +56,15 @@ def load(cfg: dict, adapter: str | None, device: int = 0, quantize: bool | None 
         torch_dtype=dtype, device_map={"": device},
         attn_implementation="sdpa")
     if adapter:
+        # A local path that does not exist is treated by PEFT as a Hub repo id,
+        # which fails 50 lines later as a 401 from huggingface.co. Say what is
+        # actually wrong: training did not produce an adapter here.
+        if not Path(adapter, "adapter_config.json").is_file():
+            raise SystemExit(
+                f"No adapter at '{adapter}' (adapter_config.json missing).\n"
+                "  Training did not finish, or out_dir in the config does not\n"
+                "  match --adapter. Run without --adapter for the zero-shot baseline."
+            )
         from peft import PeftModel
         model = PeftModel.from_pretrained(model, adapter)
     return model.eval(), processor

@@ -20,14 +20,20 @@ from .data import PlanSFT, load_records
 
 
 def pick_dtype() -> tuple[torch.dtype, bool]:
-    """T4 (Turing, sm_75) has no bfloat16. Ampere and later do.
+    """Native bf16 needs compute capability >= 8.0 (Ampere and later).
 
-    Passing bf16=True to TrainingArguments on a T4 raises outright, and
-    torch_dtype=bfloat16 silently emulates at a large cost, so this has to be
-    decided from the hardware rather than hardcoded.
+    Do NOT use torch.cuda.is_bf16_supported(): it defaults to
+    including_emulation=True and answers True on a T4 (sm_75), where PyTorch
+    then EMULATES bf16 -- numerically fine, ruinously slow. Ask the device
+    capability directly.
     """
-    ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
-    return (torch.bfloat16, True) if ok else (torch.float16, False)
+    if not torch.cuda.is_available():
+        return torch.float16, False
+    major, minor = torch.cuda.get_device_capability()
+    name = torch.cuda.get_device_name()
+    native = major >= 8
+    print(f"gpu: {name} (sm_{major}{minor}) | native bf16: {native}")
+    return (torch.bfloat16, True) if native else (torch.float16, False)
 
 
 def device_map_for_training() -> dict:
@@ -71,7 +77,7 @@ def build_training_args(cfg: dict, bf16_ok: bool, n_train: int) -> TrainingArgum
         "gradient_checkpointing_kwargs": {"use_reentrant": False},
         "ddp_find_unused_parameters": False,
         "logging_steps": 10,
-        "eval_strategy": cfg.get("eval_strategy", "epoch"),
+        "eval_strategy": cfg.get("eval_strategy", "no"),
         # Checkpoint on a step interval, not per epoch: a session that dies
         # 80% through epoch 1 otherwise leaves nothing to resume from.
         "save_strategy": cfg.get("save_strategy", "steps"),
@@ -164,8 +170,15 @@ def main() -> None:
 
     targs = build_training_args(cfg, bf16_ok, len(train_recs))
 
+    # Mid-run eval is off by default. Trainer's eval computes cross-entropy over
+    # the full vocab (152k) for every position and accelerate upcasts the logit
+    # tensor to fp32 -- a single ~4GiB allocation that OOMs at the epoch
+    # boundary after hours of healthy training. We score offline with the real
+    # metrics anyway, so the eval loss buys nothing.
+    do_eval = cfg.get("eval_strategy", "no") != "no"
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds,
-                      eval_dataset=dev_ds, data_collator=train_ds.collate)
+                      eval_dataset=dev_ds if do_eval else None,
+                      data_collator=train_ds.collate)
     ckpts = sorted(Path(cfg["out_dir"]).glob("checkpoint-*")) if args.resume else []
     if ckpts:
         print(f"resuming from {ckpts[-1].name}")

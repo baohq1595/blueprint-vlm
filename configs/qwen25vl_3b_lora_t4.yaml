@@ -30,8 +30,9 @@ lr: 1.0e-4
 batch_size: 1
 grad_accum: 4             # x2 GPUs = effective batch 8
 warmup_ratio: 0.03
-max_seq_len: 3072
+max_seq_len: 2048
 optim: paged_adamw_8bit
 limit_train: 4000
 limit_dev: 200
+eval_strategy: "no"   # Trainer eval OOMs on a 16GB card; score offline instead
 seed: 0
