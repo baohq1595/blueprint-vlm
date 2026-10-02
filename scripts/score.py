@@ -21,7 +21,30 @@ def main() -> None:
     args = ap.parse_args()
 
     records = load_records(args.split)
-    preds = json.loads(Path(args.predictions).read_text())["predictions"]
+    data = json.loads(Path(args.predictions).read_text())
+    preds = data["predictions"]
+
+    # Three ways to line predictions up with records, best first.
+    if data.get("keys"):
+        index = {f"{r['plan_id']}::{r['task']}": r for r in records}
+        missing = [k for k in data["keys"] if k not in index]
+        if missing:
+            raise SystemExit(
+                f"{len(missing)} scored records are not in {args.split} "
+                f"(first: {missing[0]}). The split was rebuilt after inference ran.")
+        records = [index[k] for k in data["keys"]]
+    elif data.get("limit"):
+        records = records[:data["limit"]]
+    elif len(preds) < len(records):
+        print(f"note: {len(preds)} predictions for {len(records)} records; "
+              f"assuming the first {len(preds)} (a --limit run with no keys recorded)")
+        records = records[:len(preds)]
+
+    if len(records) != len(preds):
+        raise SystemExit(
+            f"cannot align: {len(records)} records vs {len(preds)} predictions. "
+            f"Re-run inference so the predictions file records its keys.")
+
     result = E.score(records, preds)
     title = args.title or Path(args.predictions).stem
     print(E.table(result, title))

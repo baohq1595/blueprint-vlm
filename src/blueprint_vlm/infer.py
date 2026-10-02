@@ -136,10 +136,13 @@ def main() -> None:
                      args.batch_size, args.max_new_tokens)
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+    # Store the identity of every record scored, not just the count. Alignment
+    # then survives --limit, sharding, and any later change to the split.
+    keys = [f"{r['plan_id']}::{r['task']}" for r in records]
     Path(args.out).write_text(json.dumps(
         {"split": args.split, "adapter": args.adapter, "limit": args.limit,
          "num_shards": args.num_shards, "shard_id": args.shard_id,
-         "predictions": preds}, indent=2))
+         "keys": keys, "predictions": preds}, indent=2))
     print(f"wrote {args.out}")
 
 

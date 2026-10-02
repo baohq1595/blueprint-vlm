@@ -18,9 +18,12 @@ def main() -> None:
     assert ids == list(range(len(parts))), f"missing or duplicate shard: {ids}"
 
     preds = [p for part in parts for p in part["predictions"]]
-    Path(args.out).write_text(json.dumps(
-        {"split": parts[0]["split"], "adapter": parts[0]["adapter"],
-         "predictions": preds}, indent=2))
+    keys = [k for part in parts for k in part.get("keys", [])]
+    out = {"split": parts[0]["split"], "adapter": parts[0]["adapter"],
+           "limit": parts[0].get("limit"), "predictions": preds}
+    if keys:
+        out["keys"] = keys
+    Path(args.out).write_text(json.dumps(out, indent=2))
     print(f"merged {len(parts)} shards -> {len(preds)} predictions -> {args.out}")
 
 
