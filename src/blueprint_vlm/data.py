@@ -61,6 +61,6 @@ class PlanSFT(Dataset):
         return enc
 
 
-def load_records(split_dir: str | Path) -> list[dict]:
-    path = Path(split_dir) / "records.jsonl"
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+# Defined in evaluate.py (which has no torch dependency); re-exported here so
+# the training and inference paths keep importing it from the same place.
+from .evaluate import load_records  # noqa: E402,F401

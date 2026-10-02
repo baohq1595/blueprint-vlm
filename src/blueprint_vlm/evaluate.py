@@ -11,6 +11,14 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
+from pathlib import Path
+
+
+def load_records(split_dir: str | Path) -> list[dict]:
+    """Read a split's task records. Deliberately lives here, not in data.py:
+    scoring must run on a laptop with no torch installed."""
+    path = Path(split_dir) / "records.jsonl"
+    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
 _JSON = re.compile(r"\{.*\}", re.S)
 

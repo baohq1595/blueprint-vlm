@@ -9,7 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from blueprint_vlm import evaluate as E
-from blueprint_vlm.data import load_records
+from blueprint_vlm.evaluate import load_records
 
 
 def main() -> None:
