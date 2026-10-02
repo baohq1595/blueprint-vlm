@@ -11,3 +11,7 @@ accelerate>=1.3
 datasets>=3.2
 bitsandbytes>=0.45
 qwen-vl-utils>=0.0.8
+
+# Kaggle note: its images ship torchao 0.10.0, which peft>=0.14 rejects by
+# RAISING from is_torchao_available() rather than returning False. We do not use
+# torchao -- `pip uninstall -y torchao` before running inference there.
